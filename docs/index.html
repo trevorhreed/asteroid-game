@@ -855,8 +855,7 @@ function applyInput(p,k,isLocal){
           dwpn:droneWeapons[di%droneWeapons.length]});
       }
     }
-    else if(wIdx===3){ // BEAM — auto-aim, length = distance to target
-      const fallbackLen=80*bdist;
+    else if(wIdx===3){ // BEAM — auto-aim, only fires if asteroids exist
       if(spray){
         const targets=nearestAsteroids(p.x,p.y,w.sprayCount||10);
         targets.forEach(t=>{
@@ -869,24 +868,18 @@ function applyInput(p,k,isLocal){
             beam:true,bx:p.x+bca*SHIP_SIZE,by:p.y+bsa*SHIP_SIZE,ex:p.x+bca*bLen,ey:p.y+bsa*bLen,
             angle:a,len:bLen});
         });
-        if(targets.length===0){
-          p.bullets.push({x:p.x+noseX,y:p.y+noseY,vx:0,vy:0,life:6,owner:pid,wtype:3,
-            beam:true,bx:p.x+noseX,by:p.y+noseY,ex:p.x+ca*fallbackLen,ey:p.y+sa*fallbackLen,
-            angle:p.angle,len:fallbackLen});
-        }
       } else {
         const targets=nearestAsteroids(p.x,p.y,1);
-        let bAngle=p.angle, bLen=fallbackLen;
         if(targets.length>0){
           const W=getWW(),H=getWH();
           const dx=wrappedDx(p.x,targets[0].ast.x,W),dy=wrappedDy(p.y,targets[0].ast.y,H);
-          bAngle=Math.atan2(dy,dx);
-          bLen=targets[0].dist;
+          const bAngle=Math.atan2(dy,dx);
+          const bLen=targets[0].dist;
+          const bca=Math.cos(bAngle),bsa=Math.sin(bAngle);
+          p.bullets.push({x:p.x+bca*SHIP_SIZE,y:p.y+bsa*SHIP_SIZE,vx:0,vy:0,life:6,owner:pid,wtype:3,
+            beam:true,bx:p.x+bca*SHIP_SIZE,by:p.y+bsa*SHIP_SIZE,ex:p.x+bca*bLen,ey:p.y+bsa*bLen,
+            angle:bAngle,len:bLen});
         }
-        const bca=Math.cos(bAngle),bsa=Math.sin(bAngle);
-        p.bullets.push({x:p.x+bca*SHIP_SIZE,y:p.y+bsa*SHIP_SIZE,vx:0,vy:0,life:6,owner:pid,wtype:3,
-          beam:true,bx:p.x+bca*SHIP_SIZE,by:p.y+bsa*SHIP_SIZE,ex:p.x+bca*bLen,ey:p.y+bsa*bLen,
-          angle:bAngle,len:bLen});
       }
     }
     p.fireCooldown=Math.round(fireRateVal*(pstat(p,'fireRate')/8));
