@@ -178,17 +178,17 @@
     </div>
 
     <div class="setting-row">
-      <span class="setting-label">BOMBS</span>
+      <span class="setting-label">NUKES</span>
       <div class="setting-control">
         <div class="toggle on" id="sBombs"></div>
       </div>
     </div>
 
     <div class="setting-row">
-      <span class="setting-label">BOMB RADIUS</span>
+      <span class="setting-label">NUKE RADIUS</span>
       <div class="setting-control">
-        <input type="range" id="sBombRadius" min="20" max="500" step="10" value="140"/>
-        <span class="setting-val" id="vBombRadius">140</span>
+        <input type="range" id="sBombRadius" min="20" max="10000" step="10" value="5000"/>
+        <span class="setting-val" id="vBombRadius">800</span>
       </div>
     </div>
 
@@ -215,7 +215,7 @@
 </div>
 <div id="peer-id-display" class="hidden"></div>
 
-<div id="controls-hint" class="hidden">WASD — MOVE &nbsp; SPACE — FIRE &nbsp; 1-4 — WEAPON &nbsp; SHIFT — SPRAY &nbsp; E — SHIELD &nbsp; Q — BOMB &nbsp; [ ] — TILT</div>
+<div id="controls-hint" class="hidden">WASD — MOVE &nbsp; SPACE — FIRE &nbsp; 1-4 — WEAPON &nbsp; SHIFT — SPRAY &nbsp; E — SHIELD &nbsp; Q — NUKE &nbsp; [ ] — TILT</div>
 <button class="btn small danger hidden" id="endGameBtn">END GAME</button>
 
 <!-- ── Game Over Screen ── -->
@@ -242,7 +242,7 @@ resize();window.addEventListener('resize',resize);
 const DEFAULTS={
   speed:1, maxAsteroids:12, lives:3, astSize:1,
   shipSpeed:3.5, turnSpeed:0.02, fireRate:8, bulletSpeed:7, bulletDist:1, droneLife:600, droneCount:24,
-  worldSize:1, bombCount:3, bombRadius:140, playerHP:1, astHP:1, viewTilt:50,
+  worldSize:1, bombCount:3, bombRadius:5000, playerHP:1, astHP:1, viewTilt:50,
   friendlyFire:true, shields:true, bombs:true
 };
 let CFG={...DEFAULTS};
@@ -250,7 +250,7 @@ let CFG={...DEFAULTS};
 const SHIP_SIZE=14;
 const BULLET_LIFE=55;
 const SHIELD_DURATION=90, SHIELD_COOLDOWN=300;
-const BOMB_FUSE=45, BOMB_RECHARGE=400;
+const BOMB_FUSE=120, BOMB_RECHARGE=600;
 const PLAYER_COLORS=['#00ff88','#00ccff','#ff6644','#ffcc00','#ff44cc','#88ff00','#ff8800','#44ffcc','#cc88ff','#88ccff'];
 
 // ═══════════════════════════════════════
@@ -394,7 +394,7 @@ function renderPlayerList(){
         '<div class="pcfg-row">FIRE RT <input type="range" min="1" max="60" value="'+v('fireRate')+'" data-id="'+id+'" data-key="fireRate"/> <span class="pcv">'+v('fireRate')+'</span></div>'+
         '<div class="pcfg-row">BLT SPD <input type="range" min="1" max="30" step="0.5" value="'+v('bulletSpeed')+'" data-id="'+id+'" data-key="bulletSpeed"/> <span class="pcv">'+Number(v('bulletSpeed')).toFixed(1)+'</span></div>'+
         '<div class="pcfg-row">BLT DST <input type="range" min="0.2" max="5" step="0.1" value="'+v('bulletDist')+'" data-id="'+id+'" data-key="bulletDist"/> <span class="pcv">'+Number(v('bulletDist')).toFixed(1)+'x</span></div>'+
-        '<div class="pcfg-row">BOMBS <input type="range" min="0" max="50" value="'+v('bombCount')+'" data-id="'+id+'" data-key="bombCount"/> <span class="pcv">'+v('bombCount')+'</span></div>'+
+        '<div class="pcfg-row">NUKES <input type="range" min="0" max="50" value="'+v('bombCount')+'" data-id="'+id+'" data-key="bombCount"/> <span class="pcv">'+v('bombCount')+'</span></div>'+
         '<div class="pcfg-row">DRONES <input type="range" min="0" max="100" value="'+v('droneCount')+'" data-id="'+id+'" data-key="droneCount"/> <span class="pcv">'+v('droneCount')+'</span></div>'+
         '<div class="pcfg-row">SIZE <input type="range" min="0.3" max="3" step="0.1" value="'+(p.pcfg.size||1)+'" data-id="'+id+'" data-key="size"/> <span class="pcv">'+(p.pcfg.size||1).toFixed(1)+'x</span></div>'+
         '<div class="pcfg-row">DRONE LF <input type="range" min="0" max="3000" step="60" value="'+v('droneLife')+'" data-id="'+id+'" data-key="droneLife"/> <span class="pcv">'+(v('droneLife')==0?'∞':Math.round(v('droneLife')/60)+'s')+'</span></div>'+
@@ -784,11 +784,10 @@ function applyInput(p,k,isLocal){
 
     if(wIdx===0){ // CANNON
       if(spray){
-        const sc=w.sprayCount||7;
-        for(let i=Math.floor(-sc/2);i<=Math.floor(sc/2);i++){
-          const spread=i*w.spraySpread;
-          const a=p.angle+spread;
-          p.bullets.push({x:p.x+ca*SHIP_SIZE,y:p.y+sa*SHIP_SIZE,
+        const sc=24;
+        for(let i=0;i<sc;i++){
+          const a=p.angle+(i/sc)*Math.PI*2;
+          p.bullets.push({x:p.x+Math.cos(a)*SHIP_SIZE,y:p.y+Math.sin(a)*SHIP_SIZE,
             vx:Math.cos(a)*bs*(0.9+Math.random()*0.2),vy:Math.sin(a)*bs*(0.9+Math.random()*0.2),
             life:Math.round(bl*0.55),owner:pid,wtype:0});
         }
@@ -974,21 +973,45 @@ function updateBombs(){
   bombs=bombs.filter(b=>{
     b.fuse--;b.r=Math.max(0,(BOMB_FUSE-b.fuse)/BOMB_FUSE*CFG.bombRadius);
     if(b.fuse<=0){
-      spawnExplosion(b.x,b.y,50);
-      for(let i=asteroids.length-1;i>=0;i--){
-        const a=asteroids[i],dx=b.x-a.x,dy=b.y-a.y;
-        if(dx*dx+dy*dy<CFG.bombRadius*CFG.bombRadius){
-          if(players[b.owner]) players[b.owner].score+=Math.round(40/a.r*10);
-          spawnExplosion(a.x,a.y,a.r*0.7);
-          if(a.r>18*CFG.astSize*0.5){for(let j=0;j<2;j++){const ang=Math.random()*Math.PI*2,spd=0.8+Math.random()*1.2;asteroids.push(makeAsteroid(a.x,a.y,a.r*0.55,Math.cos(ang)*spd,Math.sin(ang)*spd))}}
-          asteroids.splice(i,1);
-        }
+      const BR=CFG.bombRadius;
+      // Massive particle waves
+      for(let w=0;w<12;w++){
+        const ang=Math.random()*Math.PI*2, dist=Math.random()*BR*0.3;
+        const ex=b.x+Math.cos(ang)*dist, ey=b.y+Math.sin(ang)*dist;
+        spawnExplosion(ex,ey,100,'255,255,220');
+        spawnExplosion(ex,ey,80,'255,200,80');
+        spawnExplosion(ex,ey,60,'255,100,30');
       }
+      // Ring of fire at blast edge
+      for(let i=0;i<20;i++){
+        const ang=(i/20)*Math.PI*2;
+        spawnExplosion(b.x+Math.cos(ang)*BR*0.8,b.y+Math.sin(ang)*BR*0.8,30,'255,80,0');
+      }
+      // Total annihilation — destroy ALL asteroids
+      for(let i=asteroids.length-1;i>=0;i--){
+        const a=asteroids[i];
+        if(players[b.owner]) players[b.owner].score+=Math.round(40/a.r*10);
+        const acol=a.atype?a.atype.glow.replace('#',''):'00ff88';
+        const rgb=parseInt(acol.substr(0,2),16)+','+parseInt(acol.substr(2,2),16)+','+parseInt(acol.substr(4,2),16);
+        spawnExplosion(a.x,a.y,a.r*0.7,rgb);
+        asteroids.splice(i,1);
+      }
+      // Damage + knockback all players
       for(const pid of Object.keys(players)){
         const p=players[pid];if(p.dead||p.invuln>0)continue;
-        const dx=b.x-p.x,dy=b.y-p.y;
-        if(dx*dx+dy*dy<CFG.bombRadius*CFG.bombRadius) damagePlayer(p,b.owner);
+        if(pid!==b.owner) damagePlayer(p,b.owner);
+        const dx=p.x-b.x,dy=p.y-b.y;
+        const d=Math.sqrt(dx*dx+dy*dy)||1;
+        const force=15;
+        p.vx+=dx/d*force; p.vy+=dy/d*force;
+        // Vaporize all bullets
+        if(pid!==b.owner) p.bullets=[];
       }
+      // Destroy enemy drones
+      drones=drones.filter(d=>d.owner===b.owner);
+      // Nuke flash, heavy shake, lingering radiation ring
+      render._nuke={flash:1.0,shakeT:40,shakeAmp:15,cx:b.x,cy:b.y,radius:BR};
+      render._radiation={x:b.x,y:b.y,r:BR,life:180,maxLife:180};
       return false;
     }
     return true;
@@ -1632,21 +1655,98 @@ function render(){
     }
   });
 
-  // Bombs
+  // Bombs — Nuclear
   bombs.forEach(b=>{
     const sp=toScreen(b.x,b.y);
     const prog=1-b.fuse/BOMB_FUSE;
+    const r=CFG.bombRadius*prog;
     ctx.save();
-    ctx.strokeStyle='rgba(255,100,0,'+(0.3+prog*0.5)+')';ctx.lineWidth=2;ctx.setLineDash([4,4]);
-    ctx.beginPath();ctx.arc(sp.x,sp.y,CFG.bombRadius*prog,0,Math.PI*2);ctx.stroke();ctx.setLineDash([]);
-    const dg=ctx.createRadialGradient(sp.x,sp.y,0,sp.x,sp.y,CFG.bombRadius*prog);
-    dg.addColorStop(0,'rgba(255,100,0,'+(prog*0.08)+')');dg.addColorStop(1,'rgba(255,50,0,0)');
-    ctx.fillStyle=dg;ctx.beginPath();ctx.arc(sp.x,sp.y,CFG.bombRadius*prog,0,Math.PI*2);ctx.fill();
-    const pulse=1+Math.sin(prog*30)*0.3;
-    ctx.fillStyle='rgba(255,'+Math.floor(200-prog*200)+',0,'+(0.6+prog*0.4)+')';
-    ctx.beginPath();ctx.arc(sp.x,sp.y,(5+prog*8)*pulse,0,Math.PI*2);ctx.fill();
+    // Multiple expanding shockwave rings
+    for(let s=0;s<3;s++){
+      const sr=r*(0.6+s*0.2);
+      const sa=Math.max(0,(0.3-s*0.08)*(1-prog*0.5));
+      ctx.strokeStyle='rgba(255,200,100,'+sa+')';ctx.lineWidth=2+prog*3;
+      ctx.setLineDash([4+s*2,4+s*2]);
+      ctx.beginPath();ctx.arc(sp.x,sp.y,sr,0,Math.PI*2);ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    // Fireball — large radial gradient
+    const dg=ctx.createRadialGradient(sp.x,sp.y,0,sp.x,sp.y,r);
+    dg.addColorStop(0,'rgba(255,255,220,'+(prog*0.35)+')');
+    dg.addColorStop(0.2,'rgba(255,200,50,'+(prog*0.25)+')');
+    dg.addColorStop(0.5,'rgba(255,100,0,'+(prog*0.15)+')');
+    dg.addColorStop(0.8,'rgba(200,30,0,'+(prog*0.08)+')');
+    dg.addColorStop(1,'rgba(100,0,0,0)');
+    ctx.fillStyle=dg;ctx.beginPath();ctx.arc(sp.x,sp.y,r,0,Math.PI*2);ctx.fill();
+    // Mushroom stem — vertical column rising from center
+    const stemH=r*0.8*prog;
+    const stemW=r*0.12;
+    const stemG=ctx.createLinearGradient(sp.x,sp.y,sp.x,sp.y-stemH);
+    stemG.addColorStop(0,'rgba(255,150,50,'+(prog*0.2)+')');
+    stemG.addColorStop(1,'rgba(255,200,100,'+(prog*0.05)+')');
+    ctx.fillStyle=stemG;
+    ctx.fillRect(sp.x-stemW/2,sp.y-stemH,stemW,stemH);
+    // Mushroom cap — wider glow at top
+    const capR=r*0.35*prog;
+    const capY=sp.y-stemH;
+    const cg2=ctx.createRadialGradient(sp.x,capY,0,sp.x,capY,capR);
+    cg2.addColorStop(0,'rgba(255,220,150,'+(prog*0.3)+')');
+    cg2.addColorStop(0.5,'rgba(255,120,30,'+(prog*0.15)+')');
+    cg2.addColorStop(1,'rgba(255,50,0,0)');
+    ctx.fillStyle=cg2;ctx.beginPath();ctx.arc(sp.x,capY,capR,0,Math.PI*2);ctx.fill();
+    // Pulsing hot core
+    const pulse=1+Math.sin(prog*60)*0.5;
+    const coreR=(10+prog*30)*pulse;
+    const cg=ctx.createRadialGradient(sp.x,sp.y,0,sp.x,sp.y,coreR);
+    cg.addColorStop(0,'rgba(255,255,255,'+(0.9)+')');
+    cg.addColorStop(0.4,'rgba(255,220,80,'+(0.6)+')');
+    cg.addColorStop(1,'rgba(255,80,0,0)');
+    ctx.fillStyle=cg;ctx.beginPath();ctx.arc(sp.x,sp.y,coreR,0,Math.PI*2);ctx.fill();
     ctx.restore();
   });
+
+  // Radiation afterglow
+  if(render._radiation){
+    const rad=render._radiation;
+    const sp=toScreen(rad.x,rad.y);
+    const t=rad.life/rad.maxLife;
+    ctx.save();ctx.globalAlpha=t*0.3;
+    // Pulsing green radiation ring
+    const pulse2=1+Math.sin((rad.maxLife-rad.life)*0.15)*0.2;
+    ctx.strokeStyle='rgba(0,255,50,'+t*0.4+')';ctx.lineWidth=2+t*3;
+    ctx.beginPath();ctx.arc(sp.x,sp.y,rad.r*pulse2,0,Math.PI*2);ctx.stroke();
+    // Inner glow
+    const rg=ctx.createRadialGradient(sp.x,sp.y,rad.r*0.7,sp.x,sp.y,rad.r);
+    rg.addColorStop(0,'rgba(0,255,50,0)');rg.addColorStop(1,'rgba(0,255,50,'+t*0.06+')');
+    ctx.fillStyle=rg;ctx.beginPath();ctx.arc(sp.x,sp.y,rad.r,0,Math.PI*2);ctx.fill();
+    ctx.restore();
+    rad.life--;
+    if(rad.life<=0) render._radiation=null;
+  }
+
+  // Nuclear flash + screen shake
+  if(render._nuke){
+    const n=render._nuke;
+    if(n.flash>0){
+      if(n.flash>0.7){
+        ctx.fillStyle='rgba(255,255,255,'+Math.min(1,n.flash*0.9)+')';
+      } else {
+        ctx.fillStyle='rgba(255,200,100,'+n.flash*0.5+')';
+      }
+      ctx.fillRect(0,0,W,H);
+      n.flash-=0.025;
+    }
+    if(n.shakeT>0){
+      const amp=n.shakeAmp||15;
+      const intensity=n.shakeT/40;
+      const sx=(Math.random()-0.5)*amp*intensity, sy=(Math.random()-0.5)*amp*intensity;
+      const base=CFG.viewTilt>0?'perspective(800px) rotateX('+CFG.viewTilt+'deg) scale('+(1+CFG.viewTilt*0.008)+')':'';
+      canvas.style.transform=base+' translate('+sx+'px,'+sy+'px)';
+      n.shakeT--;
+      if(n.shakeT<=0) applyViewTilt();
+    }
+    if(n.flash<=0&&n.shakeT<=0) render._nuke=null;
+  }
 
   // Players
   const pids=Object.keys(players);
@@ -1826,7 +1926,7 @@ function render(){
     if(CFG.bombs){
       const maxB=pstat(me,'bombCount');
       const bs='\u25C9'.repeat(Math.min(me.bombCount,maxB))+'\u25CB'.repeat(Math.max(0,maxB-me.bombCount));
-      abil+='BOMBS['+bs+']';
+      abil+='NUKES['+bs+']';
     }
     abil+='  TILT['+CFG.viewTilt+'°]';
     $('abilitiesDisplay').textContent=abil;
