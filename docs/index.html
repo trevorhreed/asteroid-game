@@ -215,7 +215,7 @@
 </div>
 <div id="peer-id-display" class="hidden"></div>
 
-<div id="controls-hint" class="hidden">WASD — MOVE &nbsp; SPACE — FIRE &nbsp; 1-4 — WEAPON &nbsp; SHIFT — SPRAY &nbsp; E — SHIELD &nbsp; Q — NUKE &nbsp; [ ] — TILT</div>
+<div id="controls-hint" class="hidden">WASD — MOVE &nbsp; SPACE — FIRE &nbsp; 1-4 — WEAPON &nbsp; SHIFT — SPRAY &nbsp; E — SHIELD &nbsp; Q — NUKE &nbsp; [ ] — TILT &nbsp; R — RECORD</div>
 <button class="btn small danger hidden" id="endGameBtn">END GAME</button>
 
 <!-- ── Game Over Screen ── -->
@@ -230,6 +230,9 @@
 </div>
 
 <canvas id="game"></canvas>
+<div id="rec-indicator" style="display:none;position:fixed;top:12px;right:16px;z-index:999;pointer-events:none;font:bold 14px 'Share Tech Mono',monospace;color:#ff3030;text-shadow:0 0 8px #ff0000;letter-spacing:2px">
+  <span id="rec-dot" style="display:inline-block;width:10px;height:10px;background:#ff2020;border-radius:50%;margin-right:6px;vertical-align:middle;box-shadow:0 0 8px #ff0000"></span>REC
+</div>
 
 <script>
 const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
@@ -260,6 +263,7 @@ let peer=null,isHost=false,connections=[],hostConn=null;
 let myId='',myName='PILOT',peerRetries=0;
 let phase='connect'; // connect | lobby | game | gameover
 let players={},asteroids=[],particles=[],bombs=[],drones=[];
+let recorder=null, recordChunks=[], recording=false;
 let gameRunning=false;
 let weaponIndicator={show:false,name:'',timer:0};
 let sprayMode=false;
@@ -276,6 +280,7 @@ window.addEventListener('keydown',e=>{keys[e.code]=true;if(['Space','ArrowUp','A
   // Mid-game tilt adjustment
   if(e.code==='BracketLeft'&&phase==='game'){CFG.viewTilt=Math.max(0,CFG.viewTilt-5);applyViewTilt()}
   if(e.code==='BracketRight'&&phase==='game'){CFG.viewTilt=Math.min(70,CFG.viewTilt+5);applyViewTilt()}
+  if(e.code==='KeyR'&&phase==='game'&&!e.ctrlKey&&!e.metaKey) toggleRecording();
 });
 window.addEventListener('keyup',e=>{keys[e.code]=false;
   if(e.code==='ShiftLeft'||e.code==='ShiftRight')sprayMode=false;
@@ -372,6 +377,59 @@ function applyViewTilt(){
     cv.style.transform='';
   }
 }
+
+function toggleRecording(){
+  if(!recording) startRecording();
+  else stopRecording();
+}
+let _recPulse=null;
+function startRecording(){
+  // Try full-page capture first, fallback to canvas
+  if(navigator.mediaDevices&&navigator.mediaDevices.getDisplayMedia){
+    navigator.mediaDevices.getDisplayMedia({video:{displaySurface:'browser'},audio:false})
+    .then(stream=>beginRecording(stream,true))
+    .catch(()=>beginRecording(canvas.captureStream(30),false));
+  } else {
+    beginRecording(canvas.captureStream(30),false);
+  }
+}
+function beginRecording(stream,isDisplay){
+  try{
+    const mime=['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm','video/mp4']
+      .find(m=>MediaRecorder.isTypeSupported(m))||'video/webm';
+    recorder=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:8000000});
+    recorder._stream=stream;
+    recordChunks=[];
+    recorder.ondataavailable=e=>{if(e.data.size>0)recordChunks.push(e.data)};
+    if(isDisplay) stream.getVideoTracks()[0].onended=()=>{if(recording)stopRecording()};
+    recorder.start(100);
+    recording=true;
+    $('rec-indicator').style.display='block';
+    _recPulse=setInterval(()=>{
+      const d=$('rec-dot');
+      d.style.opacity=d.style.opacity==='0.3'?'1':'0.3';
+    },500);
+  }catch(e){console.error('Recording failed:',e)}
+}
+function stopRecording(){
+  if(recorder&&recorder.state!=='inactive'){
+    const mime=recorder.mimeType;
+    recorder.onstop=()=>{
+      const blob=new Blob(recordChunks,{type:mime});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a');
+      a.href=url;a.download='asteroids_'+Date.now()+'.webm';
+      document.body.appendChild(a);a.click();document.body.removeChild(a);
+      setTimeout(()=>URL.revokeObjectURL(url),5000);
+    };
+    if(recorder._stream) recorder._stream.getTracks().forEach(t=>t.stop());
+    recorder.stop();
+  }
+  recording=false;recorder=null;
+  $('rec-indicator').style.display='none';
+  if(_recPulse){clearInterval(_recPulse);_recPulse=null}
+}
+
 
 function pcfgV(p,key){return p.pcfg[key]!==undefined?p.pcfg[key]:CFG[key]}
 
