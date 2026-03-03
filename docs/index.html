@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ASTEROIDS!!</title>
+<title>ASTEROIDS // MULTIPLAYER</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
@@ -233,7 +233,7 @@ resize();window.addEventListener('resize',resize);
 // ═══════════════════════════════════════
 const DEFAULTS={
   speed:1, maxAsteroids:12, lives:3, astSize:1,
-  shipSpeed:3.5, turnSpeed:0.02, fireRate:8, bulletSpeed:7, bulletDist:1,
+  shipSpeed:3.5, turnSpeed:0.02, fireRate:8, bulletSpeed:7, bulletDist:1, droneCount:24,
   worldSize:1, bombCount:3, playerHP:1, astHP:1, viewTilt:50,
   friendlyFire:true, shields:true, bombs:true
 };
@@ -362,6 +362,7 @@ function renderPlayerList(){
         <div class="pcfg-row">BLT SPD <input type="range" min="1" max="30" step="0.5" value="${v('bulletSpeed')}" data-id="${id}" data-key="bulletSpeed"/> <span class="pcv">${Number(v('bulletSpeed')).toFixed(1)}</span></div>
         <div class="pcfg-row">BLT DST <input type="range" min="0.2" max="5" step="0.1" value="${v('bulletDist')}" data-id="${id}" data-key="bulletDist"/> <span class="pcv">${Number(v('bulletDist')).toFixed(1)}x</span></div>
         <div class="pcfg-row">BOMBS <input type="range" min="0" max="50" value="${v('bombCount')}" data-id="${id}" data-key="bombCount"/> <span class="pcv">${v('bombCount')}</span></div>
+        <div class="pcfg-row">DRONES <input type="range" min="0" max="100" value="${v('droneCount')}" data-id="${id}" data-key="droneCount"/> <span class="pcv">${v('droneCount')}</span></div>
         <div class="pcfg-row">SIZE <input type="range" min="0.3" max="3" step="0.1" value="${p.pcfg.size||1}" data-id="${id}" data-key="size"/> <span class="pcv">${(p.pcfg.size||1).toFixed(1)}x</span></div>
       </div>`;
     if(isHost){
@@ -608,7 +609,7 @@ function makePlayer(id,name,colorIdx){
     bullets:[],fireCooldown:0,invuln:120,dead:false,
     shieldActive:0,shieldCooldown:0,
     bombCount:CFG.bombCount,bombRecharge:0,
-    weapon:0, trail:[],
+    weapon:5, trail:[],
     pcfg:{} // per-player overrides
   };
 }
@@ -748,12 +749,18 @@ function applyInput(p,k){
     else if(p.weapon===4){ // MINE
       p.bullets.push({x:p.x-ca*SHIP_SIZE*1.5,y:p.y-sa*SHIP_SIZE*1.5,vx:0,vy:0,life:Math.round(300*bdist),owner:pid,wtype:4,mine:true,armed:30});
     }
-    else if(p.weapon===5){ // DRONE
-      // Max 12 drones per player
+    else if(p.weapon===5){ // DRONE - deploy swarm
       const myDrones=drones.filter(d=>d.owner===pid);
-      if(myDrones.length<12){
-        drones.push({x:p.x,y:p.y,vx:0,vy:0,angle:p.angle,owner:pid,life:Math.round(600*bdist),
-          fireCd:0,orbitAngle:Math.random()*Math.PI*2,color:p.color||'#44ffaa'});
+      const maxD=pstat(p,'droneCount');
+      const toSpawn=maxD-myDrones.length;
+      const droneWeapons=['pulse','burst','rail','seeker'];
+      for(let di=0;di<toSpawn;di++){
+        const spawnAngle=p.angle+(di/Math.max(toSpawn,1))*Math.PI*2;
+        drones.push({x:p.x+Math.cos(spawnAngle)*15,y:p.y+Math.sin(spawnAngle)*15,
+          vx:Math.cos(spawnAngle)*3,vy:Math.sin(spawnAngle)*3,
+          angle:spawnAngle,owner:pid,life:Math.round(600*bdist),
+          fireCd:0,orbitAngle:spawnAngle,color:p.color||'#44ffaa',
+          dwpn:droneWeapons[di%droneWeapons.length]});
       }
     }
     else if(p.weapon===6){ // FLAK
@@ -886,41 +893,126 @@ function updateBombs(){
 
 function updateDrones(){
   const W=getWW(),H=getWH();
+  // Build threat list per owner once
+  const threatCache={};
+  function getThreats(ownerId){
+    if(threatCache[ownerId]) return threatCache[ownerId];
+    const owner=players[ownerId];if(!owner) return[];
+    const threats=[];
+    for(let i=0;i<asteroids.length;i++){
+      const a=asteroids[i];
+      const dx=wrappedDx(owner.x,a.x,W),dy=wrappedDy(owner.y,a.y,H);
+      const dist=Math.sqrt(dx*dx+dy*dy);
+      const nx=dist>0?dx/dist:0,ny=dist>0?dy/dist:0;
+      const closing=-(a.vx*nx+a.vy*ny);
+      const threat=Math.max(0,(800-Math.min(dist,800))/800*40+closing*8+a.r/30*10);
+      threats.push({type:'ast',idx:i,x:a.x,y:a.y,vx:a.vx,vy:a.vy,r:a.r,threat,dist,claimed:0});
+    }
+    for(const oid of Object.keys(players)){
+      if(oid===ownerId)continue;
+      const op=players[oid];if(!op||op.dead)continue;
+      const dx=wrappedDx(owner.x,op.x,W),dy=wrappedDy(owner.y,op.y,H);
+      const dist=Math.sqrt(dx*dx+dy*dy);
+      const spd=Math.sqrt(op.vx*op.vx+op.vy*op.vy);
+      const nx=dist>0?dx/dist:0,ny=dist>0?dy/dist:0;
+      const closing=-(op.vx*nx+op.vy*ny);
+      const threat=Math.max(0,(900-Math.min(dist,900))/900*50+closing*10+spd*5+25);
+      threats.push({type:'plr',id:oid,x:op.x,y:op.y,vx:op.vx,vy:op.vy,r:SHIP_SIZE,threat,dist,claimed:0});
+    }
+    threats.sort((a,b)=>b.threat-a.threat);
+    threatCache[ownerId]=threats;
+    return threats;
+  }
+
+  // Drone weapon configs
+  const DW={
+    pulse:{rate:10,spd:8,life:25,dmg:1,color:null,spread:0},       // fast single shots
+    burst:{rate:20,spd:6,life:20,dmg:1,color:null,spread:0,count:3,burstDelay:3}, // 3-round burst
+    rail: {rate:35,spd:14,life:40,dmg:3,color:'#00ffff',spread:0,pierce:true},    // piercing bolt
+    seeker:{rate:30,spd:4,life:80,dmg:1,color:'#ff44cc',spread:0,homing:true}    // mini homing
+  };
+
   drones=drones.filter(d=>{
     d.life--;
     if(d.life<=0){spawnExplosion(d.x,d.y,8,'68,255,170');return false}
     const owner=players[d.owner];
     if(!owner||owner.dead){d.life=0;return false}
-    // Orbit owner
-    d.orbitAngle+=0.03;
-    const orbitR=280;
-    const tx=owner.x+Math.cos(d.orbitAngle)*orbitR;
-    const ty=owner.y+Math.sin(d.orbitAngle)*orbitR;
-    const dx=wrappedDx(d.x,tx,W),dy=wrappedDy(d.y,ty,H);
-    const dist=Math.sqrt(dx*dx+dy*dy);
-    if(dist>2){d.vx+=dx/dist*0.8;d.vy+=dy/dist*0.8}
-    d.vx*=0.9;d.vy*=0.9;
+    const threats=getThreats(d.owner);
+    const dwpn=d.dwpn||'pulse';
+    const wc=DW[dwpn]||DW.pulse;
+
+    // Pick target (spread drones, max 4 per target)
+    let tgt=null,tgtDist=Infinity;
+    for(const t of threats){
+      if(t.claimed>=4)continue;
+      const tdx=wrappedDx(d.x,t.x,W),tdy=wrappedDy(d.y,t.y,H);
+      const td=Math.sqrt(tdx*tdx+tdy*tdy);
+      if(td<800){tgt=t;tgtDist=td;t.claimed++;break}
+    }
+
+    if(tgt){
+      const tdx=wrappedDx(d.x,tgt.x,W),tdy=wrappedDy(d.y,tgt.y,H);
+      // Lead prediction
+      const travelTime=tgtDist/Math.max(wc.spd,4);
+      const leadX=tgt.x+tgt.vx*travelTime*0.5;
+      const leadY=tgt.y+tgt.vy*travelTime*0.5;
+      const ldx=wrappedDx(d.x,leadX,W),ldy=wrappedDy(d.y,leadY,H);
+      d.angle=Math.atan2(ldy,ldx);
+
+      // Engage: maintain ~100px distance, strafe at close range
+      const engageDist=100;
+      if(tgtDist>engageDist+30){
+        d.vx+=tdx/tgtDist*1.8;d.vy+=tdy/tgtDist*1.8;
+      } else if(tgtDist<engageDist-30){
+        d.vx-=tdx/tgtDist*0.8;d.vy-=tdy/tgtDist*0.8;
+      } else {
+        const perpX=-tdy/tgtDist,perpY=tdx/tgtDist;
+        d.vx+=perpX*0.8;d.vy+=perpY*0.8;
+      }
+
+      // Fire
+      if(d.fireCd>0)d.fireCd--;
+      if(d.fireCd<=0&&tgtDist<500){
+        const fa=Math.atan2(ldy,ldx);
+        const fca=Math.cos(fa),fsa=Math.sin(fa);
+        if(dwpn==='burst'){
+          // Queue burst
+          d.burstLeft=wc.count;d.burstAngle=fa;d.fireCd=wc.rate;
+        } else {
+          if(owner) owner.bullets.push({x:d.x,y:d.y,vx:fca*wc.spd,vy:fsa*wc.spd,
+            life:wc.life,owner:d.owner,wtype:5,
+            pierce:wc.pierce||false,homing:wc.homing||false,turnRate:0.05,
+            droneColor:wc.color});
+          d.fireCd=wc.rate;
+        }
+      }
+      // Burst firing
+      if(d.burstLeft>0){
+        if(!d.burstCd||d.burstCd<=0){
+          const fca=Math.cos(d.burstAngle),fsa=Math.sin(d.burstAngle);
+          if(owner) owner.bullets.push({x:d.x,y:d.y,vx:fca*wc.spd,vy:fsa*wc.spd,
+            life:wc.life,owner:d.owner,wtype:5});
+          d.burstLeft--;d.burstCd=wc.burstDelay||3;
+        } else d.burstCd--;
+      }
+    } else {
+      // No target: orbit owner freely
+      d.orbitAngle+=0.025;
+      const orbitR=200+Math.sin(d.orbitAngle*0.7)*80;
+      const ox=owner.x+Math.cos(d.orbitAngle)*orbitR;
+      const oy=owner.y+Math.sin(d.orbitAngle)*orbitR;
+      const odx=wrappedDx(d.x,ox,W),ody=wrappedDy(d.y,oy,H);
+      const od=Math.sqrt(odx*odx+ody*ody);
+      if(od>3){d.vx+=odx/od*1.0;d.vy+=ody/od*1.0}
+      d.angle=Math.atan2(d.vy,d.vx);
+    }
+
+    // Speed cap & damping — high speed
+    const spd=Math.sqrt(d.vx*d.vx+d.vy*d.vy);
+    const maxSpd=10;
+    if(spd>maxSpd){d.vx*=maxSpd/spd;d.vy*=maxSpd/spd}
+    d.vx*=0.97;d.vy*=0.97;
     d.x=(d.x+d.vx+W)%W;d.y=(d.y+d.vy+H)%H;
-    // Find nearest target
-    let tgt=null,td=350;
-    for(const a of asteroids){
-      const adx=wrappedDx(d.x,a.x,W),ady=wrappedDy(d.y,a.y,H),ad=Math.sqrt(adx*adx+ady*ady);
-      if(ad<td){td=ad;tgt={x:a.x,y:a.y,dx:adx,dy:ady}}
-    }
-    for(const oid of Object.keys(players)){
-      if(oid===d.owner)continue;const op=players[oid];if(!op||op.dead)continue;
-      const pdx=wrappedDx(d.x,op.x,W),pdy=wrappedDy(d.y,op.y,H),pd=Math.sqrt(pdx*pdx+pdy*pdy);
-      if(pd<td){td=pd;tgt={x:op.x,y:op.y,dx:pdx,dy:pdy}}
-    }
-    if(tgt) d.angle=Math.atan2(tgt.dy,tgt.dx);
-    // Fire at target
-    if(d.fireCd>0)d.fireCd--;
-    if(tgt&&d.fireCd<=0&&td<320){
-      const ca=Math.cos(d.angle),sa=Math.sin(d.angle);
-      const bs=5;
-      if(owner) owner.bullets.push({x:d.x,y:d.y,vx:ca*bs,vy:sa*bs,life:30,owner:d.owner,wtype:5});
-      d.fireCd=15;
-    }
     return true;
   });
 }
@@ -1517,9 +1609,24 @@ function render(){
         ctx.fillStyle=`rgba(255,136,68,${b.life/18})`;
         ctx.fillRect(bp.x-1,bp.y-1,2,2);
       }
-      else if(wt===5){ // DRONE bullet
-        ctx.fillStyle='#44ffaa';ctx.shadowColor='#44ffaa';ctx.shadowBlur=4;
-        ctx.fillRect(bp.x-1.5,bp.y-1.5,3,3);ctx.shadowBlur=0;
+      else if(wt===5){ // DRONE bullet — use droneColor if set
+        const dc=b.droneColor||'#44ffaa';
+        if(b.homing){
+          const a=Math.atan2(b.vy,b.vx)+rot;
+          ctx.save();ctx.translate(bp.x,bp.y);ctx.rotate(a);
+          ctx.fillStyle=dc;ctx.shadowColor=dc;ctx.shadowBlur=6;
+          ctx.beginPath();ctx.moveTo(4,0);ctx.lineTo(-2,-2);ctx.lineTo(-2,2);ctx.closePath();ctx.fill();
+          ctx.shadowBlur=0;ctx.restore();
+        } else if(b.pierce){
+          const a=Math.atan2(b.vy,b.vx)+rot;
+          ctx.save();ctx.translate(bp.x,bp.y);ctx.rotate(a);
+          ctx.strokeStyle=dc;ctx.shadowColor=dc;ctx.shadowBlur=8;ctx.lineWidth=1.5;
+          ctx.beginPath();ctx.moveTo(-5,0);ctx.lineTo(5,0);ctx.stroke();
+          ctx.shadowBlur=0;ctx.restore();
+        } else {
+          ctx.fillStyle=dc;ctx.shadowColor=dc;ctx.shadowBlur=4;
+          ctx.fillRect(bp.x-1.5,bp.y-1.5,3,3);ctx.shadowBlur=0;
+        }
       }
       else if(wt===3){ // HOMING
         const a=Math.atan2(b.vy,b.vx)+rot;
@@ -1548,19 +1655,25 @@ function render(){
     const dp=toScreen(d.x,d.y);
     const da=d.angle+rot;
     ctx.save();ctx.translate(dp.x,dp.y);ctx.rotate(da);
-    // Drone body - small diamond
-    ctx.strokeStyle=d.color||'#44ffaa';ctx.lineWidth=1.5;ctx.shadowColor=d.color||'#44ffaa';ctx.shadowBlur=8;
+    const dc=d.color||'#44ffaa';
+    // Drone body
+    ctx.strokeStyle=dc;ctx.lineWidth=1.5;ctx.shadowColor=dc;ctx.shadowBlur=8;
     ctx.beginPath();ctx.moveTo(7,0);ctx.lineTo(0,-4);ctx.lineTo(-5,0);ctx.lineTo(0,4);ctx.closePath();
-    ctx.fillStyle=`rgba(${hexToRgb(d.color||'#44ffaa')},0.15)`;ctx.fill();ctx.stroke();
-    // Rotating scanner
+    ctx.fillStyle=`rgba(${hexToRgb(dc)},0.15)`;ctx.fill();ctx.stroke();
+    // Weapon type marker
+    const wm=d.dwpn||'pulse';
+    if(wm==='rail'){ctx.strokeStyle='#00ffff88';ctx.lineWidth=0.8;ctx.beginPath();ctx.moveTo(7,0);ctx.lineTo(12,0);ctx.stroke()}
+    else if(wm==='seeker'){ctx.fillStyle='#ff44cc88';ctx.beginPath();ctx.arc(0,0,1.5,0,Math.PI*2);ctx.fill()}
+    else if(wm==='burst'){ctx.fillStyle=dc;for(let bi=0;bi<3;bi++){ctx.fillRect(8+bi*2,-0.5,1,1)}}
+    // Scanner
     const scanA=(d.orbitAngle||0)*3;
-    ctx.strokeStyle=`rgba(${hexToRgb(d.color||'#44ffaa')},0.3)`;ctx.lineWidth=0.5;
-    ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(Math.cos(scanA)*12,Math.sin(scanA)*12);ctx.stroke();
+    ctx.strokeStyle=`rgba(${hexToRgb(dc)},0.25)`;ctx.lineWidth=0.5;
+    ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(Math.cos(scanA)*10,Math.sin(scanA)*10);ctx.stroke();
     ctx.shadowBlur=0;ctx.restore();
-    // Life bar
+    // Life bar when low
     if(d.life<200){
       const ratio=d.life/600;
-      ctx.fillStyle=`rgba(68,255,170,${0.5})`;ctx.fillRect(dp.x-6,dp.y+7,12*ratio,1.5);
+      ctx.fillStyle='rgba(68,255,170,0.5)';ctx.fillRect(dp.x-6,dp.y+7,12*ratio,1.5);
     }
   });
 
