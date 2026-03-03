@@ -1574,27 +1574,22 @@ function render(){
   }
 
   // ── World Grid ──
-  // Faint grid covering the entire playing field
+  // Faint grid covering the entire playing field, drawn relative to camera
   {
     const gridSize=100;
     ctx.save();
-    ctx.strokeStyle='rgba(0,255,136,0.035)';
-    ctx.lineWidth=0.5;
-    // Determine visible world range from camera
-    const margin=200;
-    const camX=me?me.x:WW/2, camY=me?me.y:WH/2;
-    const viewW=W+margin*2, viewH=H+margin*2;
-    const startGX=Math.floor(0/gridSize)*gridSize;
-    const endGX=Math.ceil(WW/gridSize)*gridSize;
-    const startGY=Math.floor(0/gridSize)*gridSize;
-    const endGY=Math.ceil(WH/gridSize)*gridSize;
-    for(let gx=startGX;gx<=endGX;gx+=gridSize){
-      const p0=toScreen(gx,0),p1=toScreen(gx,WH);
-      ctx.beginPath();ctx.moveTo(p0.x,p0.y);ctx.lineTo(p1.x,p1.y);ctx.stroke();
-    }
-    for(let gy=startGY;gy<=endGY;gy+=gridSize){
-      const p0=toScreen(0,gy),p1=toScreen(WW,gy);
-      ctx.beginPath();ctx.moveTo(p0.x,p0.y);ctx.lineTo(p1.x,p1.y);ctx.stroke();
+    ctx.strokeStyle='rgba(0,255,136,0.12)';
+    ctx.lineWidth=1;
+    const diag2=Math.sqrt(W*W+H*H)/2+gridSize;
+    const gridRange=Math.ceil(diag2/gridSize)+1;
+    const gox=camX%gridSize, goy=camY%gridSize;
+    for(let i=-gridRange;i<=gridRange;i++){
+      const wx=-gox+i*gridSize, wy0=-diag2, wy1=diag2;
+      const p0=rotPt(wx,wy0,rot), p1=rotPt(wx,wy1,rot);
+      ctx.beginPath();ctx.moveTo(cx+p0.x,cy+p0.y);ctx.lineTo(cx+p1.x,cy+p1.y);ctx.stroke();
+      const wy=-goy+i*gridSize, wx0=-diag2, wx1=diag2;
+      const p2=rotPt(wx0,wy,rot), p3=rotPt(wx1,wy,rot);
+      ctx.beginPath();ctx.moveTo(cx+p2.x,cy+p2.y);ctx.lineTo(cx+p3.x,cy+p3.y);ctx.stroke();
     }
     ctx.restore();
   }
